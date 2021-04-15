@@ -1,3 +1,3 @@
 module github.com/dclairac/traefik-plugin-headers
 
-go 1.15
+go 1.16

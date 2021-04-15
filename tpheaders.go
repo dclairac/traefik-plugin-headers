@@ -1,8 +1,13 @@
+// Package traefik_plugin_headers a plugin to c-edit headers.
 package traefik_plugin_headers
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"fmt"
+	"log"
+	"net"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -10,38 +15,34 @@ import (
 	"time"
 )
 
-//Structure to store Headers transformations instructions
-type HeaderChange struct {
-	Name    string `yaml:"name"`
-	Header  string `yaml:"header"`
-	Req     bool   `yaml:"request"`
-	Value   string `yaml:"value"`
-	Replace string `yaml:"replace"`
-	Sep     string `yaml:"sep"`
-	Action  string `yaml:"action"`
+// Header holds Headers transformations instructions.
+type Header struct {
+	Description string `yaml:"name"`
+	Value       string `yaml:"value"`
+	Replace     string `yaml:"replace"`
+	Action      string `yaml:"action"`
 }
 
-//Structure to store RequestURI regexp and headers associated
+// Rule holds RequestURI regexp and headers associated.
 type Rule struct {
-	Name          string         `yaml:"name"`
-	Regexp        string         `yaml:"regexp"`
-	HeaderChanges []HeaderChange `yaml:"headerChanges"`
+	Name            string            `yaml:"name"`
+	Regexp          string            `yaml:"regexp"`
+	RequestHeaders  map[string]Header `yaml:"requestHeader"`
+	ResponseHeaders map[string]Header `yaml:"responseHeaders"`
 }
 
-/*
-  Plugin Configuration Structure
-  - rules (optional): List of regex rules to select if headers transformations are necessary
-  - defaultHeaders (optional): Headers transformations to apply if no other rule match
-*/
+// Config holds Plugin Configuration Structure.
+//  - rules (optional): List of regex rules to select if headers transformations are necessary
+//  - defaultHeaders (optional): Headers transformations to apply if no other rule match
 type Config struct {
-	DefaultHeaders []HeaderChange `yaml:"defaultHeaders"`
-	Rules          []Rule         `yaml:"rules"`
+	DefaultHeaders map[string]Header `yaml:"defaultHeaders"`
+	Rules          []Rule            `yaml:"rules"`
 }
 
 // CreateConfig creates the default plugin configuration.
 func CreateConfig() *Config {
 	return &Config{
-		DefaultHeaders: []HeaderChange{},
+		DefaultHeaders: make(map[string]Header),
 		Rules:          []Rule{},
 	}
 }
@@ -49,14 +50,14 @@ func CreateConfig() *Config {
 // TraefikPluginHeader a plugin to alter headers based on URL regexp rules.
 type TraefikPluginHeader struct {
 	next           http.Handler
-	defaultHeaders []HeaderChange
+	defaultHeaders map[string]Header
 	rules          []Rule
 	name           string
 }
 
 // New created a new TraefikPluginHeader plugin.
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
-	//TODO: Check Configuration Here
+	// Check Configuration Here
 	return &TraefikPluginHeader{
 		defaultHeaders: config.DefaultHeaders,
 		rules:          config.Rules,
@@ -65,115 +66,155 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	}, nil
 }
 
-func (a *TraefikPluginHeader) applyheaderChanges(hr []HeaderChange, rw http.ResponseWriter, req *http.Request) {
-	for _, headerChange := range hr {
-		if headerChange.Action != "unset" {
-			//No need to check for Value replacement for unset type
-			dateAddRe := regexp.MustCompile(`@DT_ADD#([\d]+)@`)
-			if dateAddRe.MatchString(headerChange.Value) {
-				//Extract the number of second to add at current date
-				nbSecToAdd, err := strconv.Atoi(dateAddRe.FindStringSubmatch(headerChange.Value)[1])
-				if err != nil {
-					nbSecToAdd = 0
-					//TODO: LOG CONVERT ERROR - SET 0
-				}
-				//Replace @DT_ADD#nb_seconds@ by calculated (now + nb seconds) datetime formatted with HTTP timeformat
-				newDate := time.Now().Add(time.Second * time.Duration(nbSecToAdd)).Format(http.TimeFormat)
-				headerChange.Value = dateAddRe.ReplaceAllString(headerChange.Value, newDate)
-			}
+func (h *TraefikPluginHeader) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+	applyDefault := true
+
+	for _, rule := range h.rules {
+		// Check if one of the rules match and apply headers transformation if it's the case
+		log.Printf("evaluate [%s] rule)\n", rule.Name)
+		reqMatch := regexp.MustCompile(rule.Regexp)
+		if reqMatch.MatchString(req.URL.Path) {
+			editHeaders(rule.RequestHeaders, req.Header)
+			applyDefault = false
+
+			break
 		}
-		switch headerChange.Action {
+	}
+
+	if len(h.defaultHeaders) > 0 && applyDefault {
+		// Apply defaults only if no rules was used for the request
+		editHeaders(h.defaultHeaders, req.Header)
+	}
+
+	wrappedWriter := &responseWriter{
+		ResponseWriter: rw,
+		path:           req.URL.Path,
+		rules:          h.rules,
+		defaultHeaders: h.defaultHeaders,
+	}
+
+	h.next.ServeHTTP(wrappedWriter, req)
+
+	bodyBytes := wrappedWriter.buffer.Bytes()
+
+	if _, err := rw.Write(bodyBytes); err != nil {
+		log.Printf("unable to write rewrited body: %v", err)
+	}
+}
+
+func editHeaders(hr map[string]Header, headers http.Header) {
+	for k, v := range hr {
+		switch v.Action {
 		case "set":
-			if headerChange.Req {
-				req.Header.Set(headerChange.Header, headerChange.Value)
-			} else {
-				rw.Header().Set(headerChange.Header, headerChange.Value)
+			datas := strings.Split(v.Value, ",")
+			headers.Set(k, adapt(datas[0]))
+			for _, s := range datas[1:] {
+				headers.Add(k, adapt(s))
 			}
 		case "unset":
-			if headerChange.Req {
-				req.Header.Del(headerChange.Header)
-			} else {
-				rw.Header().Del(headerChange.Header)
-			}
+			headers.Del(k)
 		case "edit":
-			if headerChange.Req {
-				if strings.TrimSpace(req.Header.Get(headerChange.Header)) == "" {
-					// Header not exist or is empty => Add header
-					req.Header.Set(headerChange.Header, headerChange.Value)
-				} else {
-					re := regexp.MustCompile(headerChange.Replace)
-					req.Header.Set(headerChange.Header, re.ReplaceAllString(req.Header.Get(headerChange.Header), headerChange.Value))
-
-					if !strings.Contains(req.Header.Get(headerChange.Header), headerChange.Value) {
-						//Regexp was not found, replacement was not done, add value to the end with separator
-						req.Header.Set(headerChange.Header, req.Header.Get(headerChange.Header)+headerChange.Sep+headerChange.Value)
-					}
+			if headers.Get(k) == "" {
+				// Header not exist or is empty => Set header
+				datas := strings.Split(v.Value, ",")
+				headers.Set(k, adapt(datas[0]))
+				for _, s := range datas[1:] {
+					headers.Add(k, adapt(s))
 				}
 			} else {
-				if strings.TrimSpace(rw.Header().Get(headerChange.Header)) == "" {
-					// Header not exist or is empty => Add header
-					rw.Header().Set(headerChange.Header, headerChange.Value)
-				} else {
-					re := regexp.MustCompile(headerChange.Replace)
-					rw.Header().Set(headerChange.Header, re.ReplaceAllString(rw.Header().Get(headerChange.Header), headerChange.Value))
-					if !strings.Contains(rw.Header().Get(headerChange.Header), headerChange.Value) {
-						//Regexp was not found, replacement was not done, add value to the end with separator
-						rw.Header().Set(headerChange.Header, rw.Header().Get(headerChange.Header)+headerChange.Sep+headerChange.Value)
-					}
+				re := regexp.MustCompile(v.Replace)
+				headers.Set(k, adapt(re.ReplaceAllString(headers.Get(k), v.Value)))
+
+				if !strings.Contains(headers.Get(k), adapt(v.Value)) {
+					// Regexp was not found, replacement was not done, add value to the end with separator
+					headers.Add(k, adapt(v.Value))
 				}
 			}
 
 		case "append":
-			if headerChange.Req {
-				if headerChange.Sep != "" {
-					//Sep is defined, we add header at the end of existing one
-					if strings.TrimSpace(req.Header.Get(headerChange.Header)) == "" {
-						// Header was not existing, create it
-						req.Header.Set(headerChange.Header, headerChange.Value)
-					} else {
-						// Header already exist, add separator and value
-						req.Header.Set(headerChange.Header, req.Header.Get(headerChange.Header)+headerChange.Sep+headerChange.Value)
-					}
-				} else {
-					//Sep is undefined, add Header to the list
-					req.Header.Add(headerChange.Header, headerChange.Value)
-				}
-			} else {
-				if headerChange.Sep != "" {
-					//Sep is defined, we add header at the end of existing one
-					if strings.TrimSpace(rw.Header().Get(headerChange.Header)) == "" {
-						// Header was not existing, create it
-						rw.Header().Set(headerChange.Header, headerChange.Value)
-					} else {
-						// Header already exist, add separator and value
-						rw.Header().Set(headerChange.Header, rw.Header().Get(headerChange.Header)+headerChange.Sep+headerChange.Value)
-					}
-				} else {
-					//Sep is undefined, add Header to the list
-					rw.Header().Add(headerChange.Header, headerChange.Value)
-				}
-			}
+			// Header was not existing, create it
+			headers.Add(k, adapt(v.Value))
 		default:
-			//TODO LOG ERROR
-			fmt.Printf("unknown action value for header rule [%s]. Valid actions are (set|unset|edit|append)\n", headerChange.Name)
+			log.Printf("unknown action value for header rule [%s]. Valid actions are (set|unset|edit|append)\n", v.Description)
 		}
 	}
 }
 
-func (a *TraefikPluginHeader) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+func adapt(s string) string {
+	// No need to check for Value replacement for unset type
+	dateAddRe := regexp.MustCompile(`@DT_ADD#([\d]+)@`)
+	if !dateAddRe.MatchString(s) {
+		return strings.TrimSpace(s)
+	}
+
+	// Extract the number of second to add at current date.
+	nbSecToAdd, err := strconv.Atoi(dateAddRe.FindStringSubmatch(s)[1])
+	if err != nil {
+		nbSecToAdd = 0
+	}
+	// Replace @DT_ADD#nb_seconds@ by calculated (now + nb seconds) datetime formatted with HTTP time format.
+	newDate := time.Now().Add(time.Second * time.Duration(nbSecToAdd)).Format(http.TimeFormat)
+
+	return strings.TrimSpace(dateAddRe.ReplaceAllString(s, newDate))
+}
+
+type responseWriter struct {
+	buffer      bytes.Buffer
+	wroteHeader bool
+	rules       []Rule
+	path        string
+
+	http.ResponseWriter
+	defaultHeaders map[string]Header
+}
+
+func (r *responseWriter) WriteHeader(statusCode int) {
 	applyDefault := true
-	for _, rule := range a.rules {
-		//Check if one of the rules match and apply headers transformation if it's the case
-		fmt.Printf("evaluate [%s] rule)\n", rule.Name)
+
+	for _, rule := range r.rules {
+		// Check if one of the rules match and apply headers transformation if it's the case
+		log.Printf("evaluate [%s] rule)\n", rule.Name)
 		reqMatch := regexp.MustCompile(rule.Regexp)
-		if reqMatch.MatchString(req.URL.Path) {
-			a.applyheaderChanges(rule.HeaderChanges, rw, req)
+		if reqMatch.MatchString(r.path) {
+			editHeaders(rule.ResponseHeaders, r.ResponseWriter.Header())
 			applyDefault = false
+
+			break
 		}
 	}
-	if len(a.defaultHeaders) > 0 && applyDefault {
+
+	if len(r.defaultHeaders) > 0 && applyDefault {
 		// Apply defaults only if no rules was used for the request
-		a.applyheaderChanges(a.defaultHeaders, rw, req)
+		editHeaders(r.defaultHeaders, r.ResponseWriter.Header())
 	}
-	a.next.ServeHTTP(rw, req)
+
+	r.wroteHeader = true
+
+	// Delegates the Content-Length Header creation to the final body write.
+	r.ResponseWriter.Header().Del("Content-Length")
+
+	r.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (r *responseWriter) Write(p []byte) (int, error) {
+	if !r.wroteHeader {
+		r.WriteHeader(http.StatusOK)
+	}
+
+	return r.buffer.Write(p)
+}
+
+func (r *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := r.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("%T is not a http.Hijacker", r.ResponseWriter)
+	}
+
+	return hijacker.Hijack()
+}
+
+func (r *responseWriter) Flush() {
+	if flusher, ok := r.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
