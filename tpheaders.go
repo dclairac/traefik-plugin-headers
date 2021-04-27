@@ -27,7 +27,7 @@ type Header struct {
 type Rule struct {
 	Name            string            `yaml:"name"`
 	Regexp          string            `yaml:"regexp"`
-	RequestHeaders  map[string]Header `yaml:"requestHeader"`
+	RequestHeaders  map[string]Header `yaml:"requestHeaders"`
 	ResponseHeaders map[string]Header `yaml:"responseHeaders"`
 }
 
@@ -35,34 +35,30 @@ type Rule struct {
 //  - rules (optional): List of regex rules to select if headers transformations are necessary
 //  - defaultHeaders (optional): Headers transformations to apply if no other rule match
 type Config struct {
-	DefaultHeaders map[string]Header `yaml:"defaultHeaders"`
-	Rules          []Rule            `yaml:"rules"`
+	Rules []Rule `yaml:"rules"`
 }
 
 // CreateConfig creates the default plugin configuration.
 func CreateConfig() *Config {
 	return &Config{
-		DefaultHeaders: make(map[string]Header),
-		Rules:          []Rule{},
+		Rules: []Rule{},
 	}
 }
 
 // TraefikPluginHeader a plugin to alter headers based on URL regexp rules.
 type TraefikPluginHeader struct {
-	next           http.Handler
-	defaultHeaders map[string]Header
-	rules          []Rule
-	name           string
+	next  http.Handler
+	rules []Rule
+	name  string
 }
 
 // New created a new TraefikPluginHeader plugin.
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
 	// Check Configuration Here
 	return &TraefikPluginHeader{
-		defaultHeaders: config.DefaultHeaders,
-		rules:          config.Rules,
-		next:           next,
-		name:           name,
+		rules: config.Rules,
+		next:  next,
+		name:  name,
 	}, nil
 }
 
@@ -73,24 +69,19 @@ func (h *TraefikPluginHeader) ServeHTTP(rw http.ResponseWriter, req *http.Reques
 		// Check if one of the rules match and apply headers transformation if it's the case
 		log.Printf("evaluate [%s] rule)\n", rule.Name)
 		reqMatch := regexp.MustCompile(rule.Regexp)
-		if reqMatch.MatchString(req.URL.Path) {
+		if (rule.Regexp == "NO_MATCH" && applyDefault) || reqMatch.MatchString(req.URL.Path) {
+			// Changes are applied if:
+			// - Regexp = "NO_MATCH" and no rule have match the request before
+			// - Regexp Match the request
 			editHeaders(rule.RequestHeaders, req.Header)
 			applyDefault = false
-
-			break
 		}
-	}
-
-	if len(h.defaultHeaders) > 0 && applyDefault {
-		// Apply defaults only if no rules was used for the request
-		editHeaders(h.defaultHeaders, req.Header)
 	}
 
 	wrappedWriter := &responseWriter{
 		ResponseWriter: rw,
 		path:           req.URL.Path,
 		rules:          h.rules,
-		defaultHeaders: h.defaultHeaders,
 	}
 
 	h.next.ServeHTTP(wrappedWriter, req)
@@ -163,9 +154,7 @@ type responseWriter struct {
 	wroteHeader bool
 	rules       []Rule
 	path        string
-
 	http.ResponseWriter
-	defaultHeaders map[string]Header
 }
 
 func (r *responseWriter) WriteHeader(statusCode int) {
@@ -175,17 +164,10 @@ func (r *responseWriter) WriteHeader(statusCode int) {
 		// Check if one of the rules match and apply headers transformation if it's the case
 		log.Printf("evaluate [%s] rule)\n", rule.Name)
 		reqMatch := regexp.MustCompile(rule.Regexp)
-		if reqMatch.MatchString(r.path) {
+		if (rule.Regexp == "NO_MATCH" && applyDefault) || reqMatch.MatchString(r.path) {
 			editHeaders(rule.ResponseHeaders, r.ResponseWriter.Header())
 			applyDefault = false
-
-			break
 		}
-	}
-
-	if len(r.defaultHeaders) > 0 && applyDefault {
-		// Apply defaults only if no rules was used for the request
-		editHeaders(r.defaultHeaders, r.ResponseWriter.Header())
 	}
 
 	r.wroteHeader = true

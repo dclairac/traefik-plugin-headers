@@ -8,62 +8,27 @@ summary: Allow to set/unset/edit/append values of request/response header based 
 # This is mandatory,
 # and Traefik Pilot will try to execute the plugin with the data you provide as part of its startup validity tests.
 testData:
-  Default:
-    - HeaderChange:
-      Name: 'Header set'
-      Header: 'X-Check-set'
-      Req: true
-      Value: 'New Value'
-      Type: 'set'
-    - HeaderChange:
-      Name: 'Header unset'
-      Header: 'X-Check-unset'
-      Req: true
-      Type: 'unset'
-    - HeaderChange:
-      Name: 'Header edit'
-      Header: 'X-Check-edit'
-      Req: false
-      Value: 'Date=@DT_ADD#86400@'
-      Replace: 'Date=[^,]+'
-      Type: 'edit'
-    - HeaderChange:
-      Name: 'Header append'
-      Header: 'X-Check-append'
-      Req: true
-      Value: 'Added Value'
-      Sep: ', '
-      Type: 'append'
   Rules:
     - Rule:
-      Name: 'png header'
-      Regexp: '.png$'
-      HeadersChanges:
-        - HeaderChange:
-          Name: 'Header Rule 01 set 01'
-          Header: 'X-Check-R1-set1'
-          Req: true
-          Value: 'New Value'
-          Type: 'set'
-        - HeaderChange:
-          Name: 'Header Rule 01 set 02'
-          Header: 'X-Check-R1-set2'
-          Req: true
-          Value: 'New Value'
-          Type: 'set'
+      name: 'png header'
+      regexp: '.png$'
+      responseHeaders:
+        X-Check-R1-set1:
+          value: 'New Value'
+          action: 'set'
+        X-Check-R1-set2:
+          value: 'New Value'
+          action: 'set'
     - Rule:
-      Name: 'js header'
-      Regexp: '.js$'
-      HeadersChanges:
-        - HeaderChange:
-          Name: 'Header Rule 02 set 01'
-          Header: 'X-Check-R2-set1'
-          Req: true
-          Value: 'New Value'
-          Type: 'set'
-        - HeaderChange:
-          Name: 'Header Rule 02 set 02'
-          Header: 'X-Check-R2-set2'
-          Req: true
-          Value: 'New Value'
-          Type: 'set'
+      name: 'No Match Default'
+      regexp: 'NO_MATCH'
+      requestHeaders:
+        X-Check-edit:
+          value: 'Date=@DT_ADD#86400@'
+          replace: 'Date=[^,]+'
+          action: 'edit'
+        X-Check-append:
+          value: 'Added Value'
+          action: 'append'
+        X-Check-unset:
+          action: 'unset'

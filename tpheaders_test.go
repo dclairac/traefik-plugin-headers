@@ -11,152 +11,143 @@ import (
 	"time"
 )
 
-func TestDefaultRules(t *testing.T) {
+func TestHeaderTransformationAndRequest(t *testing.T) {
 	testCases := []struct {
-		desc           string
-		headers        http.Header
-		defaultHeaders map[string]Header
-		expected       http.Header
+		desc     string
+		headers  http.Header
+		rules    []Rule
+		expected http.Header
 	}{
 		{
-			desc: "default set req",
-			defaultHeaders: map[string]Header{
-				"Header-1": {
-					Action: "set",
-					Value:  "foo",
+			desc: "set",
+			rules: []Rule{
+				{
+					Name:           "01 REQ rule",
+					Regexp:         "NO_MATCH",
+					RequestHeaders: map[string]Header{"Header-1": {Action: "set", Value: "foo"}},
 				},
 			},
-			expected: http.Header{
-				"Header-1": []string{"foo"},
-			},
+			expected: http.Header{"Header-1": []string{"foo"}},
 		},
 		{
-			desc: "default set override",
-			headers: http.Header{
-				"Header-1": []string{"foo"},
-			},
-			defaultHeaders: map[string]Header{
-				"Header-1": {
-					Action: "set",
-					Value:  "bar",
+			desc:    "set overide",
+			headers: http.Header{"Header-1": []string{"foo"}},
+			rules: []Rule{
+				{
+					Name:           "02 REQ rule",
+					Regexp:         "NO_MATCH",
+					RequestHeaders: map[string]Header{"Header-1": {Action: "set", Value: "bar"}},
 				},
 			},
-			expected: http.Header{
-				"Header-1": []string{"bar"},
-			},
+			expected: http.Header{"Header-1": []string{"bar"}},
 		},
 		{
-			desc: "default unset req",
-			headers: http.Header{
-				"Header-1": []string{"foo"},
-			},
-			defaultHeaders: map[string]Header{
-				"Header-1": {
-					Action: "unset",
-					Value:  "bar",
+			desc:    "unset",
+			headers: http.Header{"Header-1": []string{"foo"}},
+			rules: []Rule{
+				{
+					Name:           "03 REQ rule",
+					Regexp:         "NO_MATCH",
+					RequestHeaders: map[string]Header{"Header-1": {Action: "unset"}},
 				},
 			},
 			expected: http.Header{},
 		},
 		{
-			desc:    "default unset req not exist",
+			desc:    "unset not exist",
 			headers: http.Header{},
-			defaultHeaders: map[string]Header{
-				"Header-1": {
-					Action: "unset",
-					Value:  "bar",
+			rules: []Rule{
+				{
+					Name:           "04 REQ rule",
+					Regexp:         "NO_MATCH",
+					RequestHeaders: map[string]Header{"Header-1": {Action: "unset"}},
 				},
 			},
 			expected: http.Header{},
 		},
 		{
-			desc: "default append",
-			headers: http.Header{
-				"Header-1": []string{"foo"},
-			},
-			defaultHeaders: map[string]Header{
-				"Header-1": {
-					Action: "append",
-					Value:  "bar",
+			desc:    "append",
+			headers: http.Header{"Header-1": []string{"foo"}},
+			rules: []Rule{
+				{
+					Name:           "05 REQ rule",
+					Regexp:         "NO_MATCH",
+					RequestHeaders: map[string]Header{"Header-1": {Action: "append", Value: "bar"}},
 				},
 			},
-			expected: http.Header{
-				"Header-1": []string{"foo", "bar"},
-			},
+			expected: http.Header{"Header-1": []string{"foo", "bar"}},
 		},
 		{
-			desc:    "default append not exist",
+			desc:    "append not exist",
 			headers: http.Header{},
-			defaultHeaders: map[string]Header{
-				"Header-1": {
-					Action: "append",
-					Value:  "bar",
+			rules: []Rule{
+				{
+					Name:           "06 REQ rule",
+					Regexp:         "NO_MATCH",
+					RequestHeaders: map[string]Header{"Header-1": {Action: "append", Value: "bar"}},
 				},
 			},
-			expected: http.Header{
-				"Header-1": []string{"bar"},
-			},
+			expected: http.Header{"Header-1": []string{"bar"}},
 		},
 		{
-			desc:    "default edit req not existing",
+			desc:    "edit not existing",
 			headers: http.Header{},
-			defaultHeaders: map[string]Header{
-				"Header-1": {
-					Action: "edit",
-					Value:  "bar",
+			rules: []Rule{
+				{
+					Name:           "07 REQ rule",
+					Regexp:         "NO_MATCH",
+					RequestHeaders: map[string]Header{"Header-1": {Action: "edit", Value: "bar"}},
 				},
 			},
-			expected: http.Header{
-				"Header-1": []string{"bar"},
-			},
+			expected: http.Header{"Header-1": []string{"bar"}},
 		},
 		{
-			desc: "default edit req wrong regexp",
-			headers: http.Header{
-				"Header-1": []string{"foo=123"},
-			},
-			defaultHeaders: map[string]Header{
-				"Header-1": {
-					Action:  "edit",
-					Replace: "foo=[azeazeazea]+",
-					Value:   "bar=456",
+			desc:    "edit wrong regexp",
+			headers: http.Header{"Header-1": []string{"foo=123"}},
+			rules: []Rule{
+				{
+					Name:           "08 REQ rule",
+					Regexp:         "NO_MATCH",
+					RequestHeaders: map[string]Header{"Header-1": {Action: "edit", Replace: "foo=[azeazeazea]+", Value: "bar=456"}},
 				},
 			},
-			expected: http.Header{
-				"Header-1": []string{"foo=123", "bar=456"},
-			},
+			expected: http.Header{"Header-1": []string{"foo=123", "bar=456"}},
 		},
 		{
-			desc: "default edit req wrong regexp",
-			headers: http.Header{
-				"Header-1": []string{"foo=123"},
-			},
-			defaultHeaders: map[string]Header{
-				"Header-1": {
-					Action:  "edit",
-					Replace: "foo=[0-9]+",
-					Value:   "bar=456",
+			desc:    "edit good regexp",
+			headers: http.Header{"Header-1": []string{"foo=123"}},
+			rules: []Rule{
+				{
+					Name:           "09 REQ rule",
+					Regexp:         "NO_MATCH",
+					RequestHeaders: map[string]Header{"Header-1": {Action: "edit", Replace: "foo=[0-9]+", Value: "foo=456"}},
 				},
 			},
-			expected: http.Header{
-				"Header-1": []string{"bar=456"},
-			},
+			expected: http.Header{"Header-1": []string{"foo=456"}},
 		},
 		{
-			desc: "default edit req DT_ADD regexp",
-			headers: http.Header{
-				"Header-1": []string{"foo=123"},
-			},
-			defaultHeaders: map[string]Header{
-				"Header-1": {
-					Action:  "edit",
-					Replace: "foo=[^,]+",
-					Value:   "foo=@DT_ADD#86400@",
+			desc:    "edit DT_ADD regexp",
+			headers: http.Header{"Header-1": []string{"foo=123"}},
+			rules: []Rule{
+				{
+					Name:           "10 REQ rule",
+					Regexp:         "NO_MATCH",
+					RequestHeaders: map[string]Header{"Header-1": {Action: "edit", Replace: "foo=[^,]+", Value: "foo=@DT_ADD#86400@"}},
 				},
 			},
-			expected: http.Header{
-				"Header-1": []string{fmt.Sprintf("foo=%s", time.Now().Add(time.Second*time.Duration(86400)).Format(http.TimeFormat))},
+			expected: http.Header{"Header-1": []string{fmt.Sprintf("foo=%s", time.Now().Add(time.Second*time.Duration(86400)).Format(http.TimeFormat))}},
+		},
+		{
+			desc:    "edit multiple values not existing",
+			headers: http.Header{},
+			rules: []Rule{
+				{
+					Name:           "11 REQ rule",
+					Regexp:         "NO_MATCH",
+					RequestHeaders: map[string]Header{"Header-1": {Action: "edit", Replace: "foo=[^,]+", Value: "bar=123, foo=@DT_ADD#86400@"}},
+				},
 			},
+			expected: http.Header{"Header-1": []string{"bar=123", fmt.Sprintf("foo=%s", time.Now().Add(time.Second*time.Duration(86400)).Format(http.TimeFormat))}},
 		},
 	}
 
@@ -165,7 +156,7 @@ func TestDefaultRules(t *testing.T) {
 		t.Run(test.desc, func(t *testing.T) {
 			ctx := context.Background()
 			cfg := &Config{
-				DefaultHeaders: test.defaultHeaders,
+				Rules: test.rules,
 			}
 			next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
 
@@ -188,22 +179,26 @@ func TestDefaultRules(t *testing.T) {
 			handler.ServeHTTP(recorder, req)
 
 			if !reflect.DeepEqual(req.Header, test.expected) {
-				t.Errorf("maps not equals\nactual:   %v\nexpected: %v", req.Header, test.expected)
+				t.Errorf("maps not equals on test %s\nactual:   %v\nexpected: %v", test.desc, req.Header, test.expected)
 			}
 		})
 	}
 }
 
-func TestRegexpRules(t *testing.T) {
-	defaultHeaders := map[string]Header{
-		"Expires":       {Action: "set", Value: "0"},
-		"Cache-Control": {Action: "set", Value: "no-cache, no-store, max-age=0, must-revalidate"},
-		"Pragma":        {Action: "set", Value: "no-cache"},
-		"Cache-Test":    {Action: "set", Value: "NO CACHE - DEFAULT"},
-	}
+func TestRegexpRulesAndResponse(t *testing.T) {
+	// Test Response headers, regexp and priority/overload
 	rules := []Rule{
 		{
-			Name:   "No Cache by URL",
+			Name:   "01 Low Cache by Extension",
+			Regexp: "(jpe?g|gif|png|js)$",
+			ResponseHeaders: map[string]Header{
+				"Cache-Control": {Action: "set", Value: "public, max-age=86400"},
+				"Expires":       {Action: "set", Value: "@DT_ADD#86400@"},
+				"Cache-Test":    {Action: "set", Value: "LOW CACHE"},
+			},
+		},
+		{
+			Name:   "02 No Cache by URL",
 			Regexp: `(nocache|no-cache)`,
 			ResponseHeaders: map[string]Header{
 				"Cache-Control": {Action: "set", Value: "public, max-age=86400"},
@@ -212,7 +207,7 @@ func TestRegexpRules(t *testing.T) {
 			},
 		},
 		{
-			Name:   "Long Cache by URL",
+			Name:   "03 Long Cache by URL",
 			Regexp: `\.cache\.`,
 			ResponseHeaders: map[string]Header{
 				"Cache-Control": {Action: "set", Value: "public, max-age=86400"},
@@ -221,12 +216,31 @@ func TestRegexpRules(t *testing.T) {
 			},
 		},
 		{
-			Name:   "Low Cache by Extension",
-			Regexp: "(jpe?g|gif|png|js)$",
+			Name:   "04 Only if no match - default",
+			Regexp: "NO_MATCH",
 			ResponseHeaders: map[string]Header{
-				"Cache-Control": {Action: "set", Value: "public, max-age=86400"},
-				"Expires":       {Action: "set", Value: "@DT_ADD#86400@"},
-				"Cache-Test":    {Action: "set", Value: "LOW CACHE"},
+				"Expires":       {Action: "set", Value: "0"},
+				"Cache-Control": {Action: "set", Value: "no-cache, no-store, max-age=0, must-revalidate"},
+				"Pragma":        {Action: "set", Value: "no-cache"},
+				"Cache-Test":    {Action: "set", Value: "NO CACHE - DEFAULT"},
+			},
+		},
+		{
+			Name:   "05 after no match",
+			Regexp: `(after-no-match)`,
+			ResponseHeaders: map[string]Header{
+				"Expires":     {Action: "set", Value: "100"},
+				"Cache-Test2": {Action: "set", Value: "AFTER"},
+			},
+		},
+		{
+			Name:   "06 Never used",
+			Regexp: "NO_MATCH",
+			ResponseHeaders: map[string]Header{
+				"Expires":       {Action: "set", Value: "0"},
+				"Cache-Control": {Action: "set", Value: "no-cache, no-store, max-age=0, must-revalidate"},
+				"Pragma":        {Action: "set", Value: "no-cache"},
+				"Cache-Test":    {Action: "set", Value: "ERROR"},
 			},
 		},
 	}
@@ -235,70 +249,23 @@ func TestRegexpRules(t *testing.T) {
 		desc               string
 		url                string
 		headers            http.Header
-		defaultHeaders     map[string]Header
 		rules              []Rule
 		respHeaderExpected http.Header
 	}{
-		{
-			desc:           "http://test01.uri.com/test.gif",
-			url:            "http://test01.uri.com/test.gif",
-			defaultHeaders: defaultHeaders,
-			rules:          rules,
+		{ // Test if Rule 01 is applied (.gif)
+			desc:  "http://test01.uri.com/test.gif",
+			url:   "http://test01.uri.com/test.gif",
+			rules: rules,
 			respHeaderExpected: http.Header{
 				"Cache-Control": []string{"public", "max-age=86400"},
 				"Expires":       []string{time.Now().Add(time.Second * time.Duration(86400)).Format(http.TimeFormat)},
 				"Cache-Test":    []string{"LOW CACHE"},
 			},
 		},
-		{
-			desc:           "http://test02.uri.com/test.png",
-			url:            "http://test02.uri.com/test.png",
-			defaultHeaders: defaultHeaders,
-			rules:          rules,
-			respHeaderExpected: http.Header{
-				"Cache-Control": []string{"public", "max-age=86400"},
-				"Expires":       []string{time.Now().Add(time.Second * time.Duration(86400)).Format(http.TimeFormat)},
-				"Cache-Test":    []string{"LOW CACHE"},
-			},
-		},
-		{
-			desc:           "http://test03.uri.com/test.jpg",
-			url:            "http://test03.uri.com/test.jpg",
-			defaultHeaders: defaultHeaders,
-			rules:          rules,
-			respHeaderExpected: http.Header{
-				"Cache-Control": []string{"public", "max-age=86400"},
-				"Expires":       []string{time.Now().Add(time.Second * time.Duration(86400)).Format(http.TimeFormat)},
-				"Cache-Test":    []string{"LOW CACHE"},
-			},
-		},
-		{
-			desc:           "http://test04.uri.com/test.jpeg",
-			url:            "http://test04.uri.com/test.jpeg",
-			defaultHeaders: defaultHeaders,
-			rules:          rules,
-			respHeaderExpected: http.Header{
-				"Cache-Control": []string{"public", "max-age=86400"},
-				"Expires":       []string{time.Now().Add(time.Second * time.Duration(86400)).Format(http.TimeFormat)},
-				"Cache-Test":    []string{"LOW CACHE"},
-			},
-		},
-		{
-			desc:           "http://test05.uri.com/test.js",
-			url:            "http://test05.uri.com/test.js",
-			defaultHeaders: defaultHeaders,
-			rules:          rules,
-			respHeaderExpected: http.Header{
-				"Cache-Control": []string{"public", "max-age=86400"},
-				"Expires":       []string{time.Now().Add(time.Second * time.Duration(86400)).Format(http.TimeFormat)},
-				"Cache-Test":    []string{"LOW CACHE"},
-			},
-		},
-		{
-			desc:           "http://test06.uri.com/test.html",
-			url:            "http://test06.uri.com/test.html",
-			defaultHeaders: defaultHeaders,
-			rules:          rules,
+		{ // Test if Rule 04 (NO_MATCH) is applied and not Rule 06 (NO_MATCH)
+			desc:  "http://test02.uri.com/test.html",
+			url:   "http://test02.uri.com/test.html",
+			rules: rules,
 			respHeaderExpected: http.Header{
 				"Cache-Control": []string{"no-cache", "no-store", "max-age=0", "must-revalidate"},
 				"Expires":       []string{"0"},
@@ -306,93 +273,26 @@ func TestRegexpRules(t *testing.T) {
 				"Cache-Test":    []string{"NO CACHE - DEFAULT"},
 			},
 		},
-		{
-			desc:           "http://test07.uri.com/testnocache.jpeg",
-			url:            "http://test07.uri.com/testnocache.jpeg",
-			defaultHeaders: defaultHeaders,
-			rules:          rules,
+		{ // Test if Rule 03 (.cache.) overload  Rule 01 (.js)
+			desc:  "http://test03.uri.com/override.cache.test.js",
+			url:   "http://test03.uri.com/override.cache.test.js",
+			rules: rules,
 			respHeaderExpected: http.Header{
 				"Cache-Control": []string{"public", "max-age=86400"},
 				"Expires":       []string{time.Now().Add(time.Second * time.Duration(86400)).Format(http.TimeFormat)},
-				"Cache-Test":    []string{"NO CACHE"},
+				"Cache-Test":    []string{"LONG CACHE"},
 			},
 		},
-		{
-			desc:           "http://test08.uri.com/testnocache.html",
-			url:            "http://test08.uri.com/testnocache.html",
-			defaultHeaders: defaultHeaders,
-			rules:          rules,
-			respHeaderExpected: http.Header{
-				"Cache-Control": []string{"public", "max-age=86400"},
-				"Expires":       []string{time.Now().Add(time.Second * time.Duration(86400)).Format(http.TimeFormat)},
-				"Cache-Test":    []string{"NO CACHE"},
-			},
-		},
-		{
-			desc:           "http://test09.uri.com/test-no-cache-10.js",
-			url:            "http://test09.uri.com/test-no-cache-10.js",
-			defaultHeaders: defaultHeaders,
-			rules:          rules,
-			respHeaderExpected: http.Header{
-				"Cache-Control": []string{"public", "max-age=86400"},
-				"Expires":       []string{time.Now().Add(time.Second * time.Duration(86400)).Format(http.TimeFormat)},
-				"Cache-Test":    []string{"NO CACHE"},
-			},
-		},
-		{
-			desc:           "http://test10.uri.com/test-no-cache-10.html",
-			url:            "http://test10.uri.com/test-no-cache-10.html",
-			defaultHeaders: defaultHeaders,
-			rules:          rules,
-			respHeaderExpected: http.Header{
-				"Cache-Control": []string{"public", "max-age=86400"},
-				"Expires":       []string{time.Now().Add(time.Second * time.Duration(86400)).Format(http.TimeFormat)},
-				"Cache-Test":    []string{"NO CACHE"},
-			},
-		},
-		{
-			desc:           "http://test11.uri.com/test-cache-10.js",
-			url:            "http://test11.uri.com/test-cache-10.js",
-			defaultHeaders: defaultHeaders,
-			rules:          rules,
-			respHeaderExpected: http.Header{
-				"Cache-Control": []string{"public", "max-age=86400"},
-				"Expires":       []string{time.Now().Add(time.Second * time.Duration(86400)).Format(http.TimeFormat)},
-				"Cache-Test":    []string{"LOW CACHE"},
-			},
-		},
-		{
-			desc:           "http://test12.uri.com/test-cache-10.html",
-			url:            "http://test12.uri.com/test-cache-10.html",
-			defaultHeaders: defaultHeaders,
-			rules:          rules,
+		{ // Test if Rule 05 (after-no-match) overload  Rule 04 (NO_MATCH)
+			desc:  "http://test04.uri.com/uri-after-no-match-test.html",
+			url:   "http://test04.uri.com/uri-after-no-match-test.html",
+			rules: rules,
 			respHeaderExpected: http.Header{
 				"Cache-Control": []string{"no-cache", "no-store", "max-age=0", "must-revalidate"},
-				"Expires":       []string{"0"},
+				"Expires":       []string{"100"},
 				"Pragma":        []string{"no-cache"},
 				"Cache-Test":    []string{"NO CACHE - DEFAULT"},
-			},
-		},
-		{
-			desc:           "http://test13.uri.com/test.cache.10.js",
-			url:            "http://test13.uri.com/test.cache.10.js",
-			defaultHeaders: defaultHeaders,
-			rules:          rules,
-			respHeaderExpected: http.Header{
-				"Cache-Control": []string{"public", "max-age=86400"},
-				"Expires":       []string{time.Now().Add(time.Second * time.Duration(86400)).Format(http.TimeFormat)},
-				"Cache-Test":    []string{"LONG CACHE"},
-			},
-		},
-		{
-			desc:           "http://test14.uri.com/test.cache.10.html",
-			url:            "http://test14.uri.com/test.cache.10.html",
-			defaultHeaders: defaultHeaders,
-			rules:          rules,
-			respHeaderExpected: http.Header{
-				"Cache-Control": []string{"public", "max-age=86400"},
-				"Expires":       []string{time.Now().Add(time.Second * time.Duration(86400)).Format(http.TimeFormat)},
-				"Cache-Test":    []string{"LONG CACHE"},
+				"Cache-Test2":   []string{"AFTER"},
 			},
 		},
 	}
@@ -402,8 +302,7 @@ func TestRegexpRules(t *testing.T) {
 		t.Run(test.desc, func(t *testing.T) {
 			ctx := context.Background()
 			cfg := &Config{
-				DefaultHeaders: test.defaultHeaders,
-				Rules:          test.rules,
+				Rules: test.rules,
 			}
 			next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 				rw.WriteHeader(http.StatusOK)

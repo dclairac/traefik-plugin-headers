@@ -46,154 +46,133 @@ http:
           - rule:
             name: 'Only for png or js'
             regexp: '(png|js)$'
-            headerChanges:
-              - headerChange:
-                name: 'Add response header Expires at now + 1 Day'
-                header: 'Expires'
-                req: false
+            responseHeaders:
+              Expires:
                 value: '@DT_ADD#86400@'
-                action: 'set'            
+                action: 'set'
+          - rule:
+            name: 'If no rules match'
+            regexp: 'NO_MATCH'
+            requestHeaders:
+              header-to-delete:
+                action: 'unset'
+                    
 ```
 
 ## How to use
 
 ### Base structure
-The plugin allow the creation of 2  `headerChange` lists:
- * **rules:** Rules to determine (`regexp`) the requests where the `headerChange` will be applied
- * **defaultHeaders:** List of `headerChange` to apply only on requests not affected by any rules
+The plugin expects a list of `rules` with for each of them:
+ * **name:** The name of the rule
+ * **regexp:** Regular expression to determine if the rule should apply to the query 
+ * **requestHeaders:** List of request headers to modify if the regexp match
+ * **responseHeaders:** List of response headers to modify if the regexp match
 
-The following example will add an `example` header to the response of png or js files, and remove the `example` header from the responses of all other requests
+
+The rules are tested and applied **in the order of declaration in the configuration**. If several rules modify the same header, it will take the value of the last rule declared in the configuration.
+
+It is possible to specify the value "`NO_MATCH`" (case sensitive) in the regexp attribute. The rule will only be applied **if no other rule has been applied before the `NO_MATCH` is encountered**, then the rule evaluation will continue.
+
+If several `NO_MATCH` rules are defined, **only the first one will have a chance to be executed**, the others will be useless (either a rule will have already been applied, or the 1st `NO_MATCH` will have been applied, which will prevent the execution of a 2nd `NO_MATCH` in any case)
+
+`requestHeaders` and `responseHeaders` will receive the map of `headers` to modify with the expected `actions` 
+
+### Headers declarations
+
+For each header, the following attributes can be defined:
+* **value:** Value to write in the header
+* **replace:** `Regexp` indicating the value to modify in the header (only for `edit`action)
+*	**action:**  Action to perform (`set`, `unset`, `edit`, `append`)
+
+## Headers `action`
+
+### Action `set` - Add or Replace header 
+
+The `set` action allows to add the `header` by giving it the indicated `value`. If the `header` already exists, its value will be replaced by the new one. (`header` name **is case insensitive**). 
 
 ```yaml
-traefik-plugin-headers:
-  plugin:
-    defaultHeaders:
-      - headerChange:
-        header: 'example'
-        type: 'unset'
-    rules:
-      - rule:
-        regexp: '(png|js)$'
-        headerChanges:
-          - headerChange:
-            header: 'example'
-            value: 'PNG OR JS'
-            type: 'set'            
+#Example
+- rule:
+  name: 'Set X-foo=bar Header to js requests'
+  regexp: '\.js$'
+  requestHeaders: 
+    X-foo: 
+      value: 'bar'
+      action: 'set'
 ```
-
-**WARNING:** Default `headerChange` are performed on **ALL** requests (no regexp) but only if they are not concerned by **ANY** other rule.
-
-### HeaderChange Structure
-
-`HeaderChange` can receive the following attributes: 
-```yaml
-headerChange:
-  name:    'Name'     # [optional] Name of the headerChange
-  header:  'Expires'  # Name of the header to modify
-  req:     false      # true = modify request header, false (default) modify response header
-  value:   'my value' # Content of the header (depends on action)           
-  replace: 'a{2}'     # Only for action edit - see edit documentation
-  sep: ', '           # Separator to use whe you append value to existing header
-  action: 'set'       # set/unset/append/edit => see documentation
-```
-
-## List of possible `action`
-
-### Action `set` - Add or replace header 
-
-the `set` action allows to add the `header` by giving it the indicated `value`. If the `header` already exists, its value will be replaced by the new one. `header` **is case insensitive**. 
-
-**Required** attributes for `set`:
-* `header`  : header to add/modify
-* `value`   : value that will be set to the header
-* `action`  : must be 'set' to perform `set`action 
-
-**Optional** attributes for `set`:
-* `name`    : name of the change. Only used for logs
-* `req`     : boolean => **true** = request / **false** *(default)* = response
+The `X-foo=bar` header will be added to requests ending in **.js**. If the `X-foo` header already exists with another value, it will be overwritten by the new value: `bar` 
 
 ### Action `unset` - delete selected header 
 
-the `unset` action will delete the request/response header that correspond to `header`attribute. `header` **is case insensitive**. 
+The `unset` action will delete the `header`. (`header` name **is case insensitive**). 
 
-**Required** attributes for `unset`:
-* `header`  : header to delete
-* `action`  : must be 'unset' to perform `unset`action 
-
-**Optional** attributes for `unset`:
-* `name`    : name of the change. Only used for logs
-* `req`     : boolean => **true** = request / **false** *(default)* = response
+```yaml
+#Example
+- rule:
+  name: 'Unset X-foo Header to js requests'
+  regexp: '\.js$'
+  requestHeaders: 
+    X-foo: 
+      action: 'unset'
+```
+The `X-foo` header will be deleted to requests ending in **.js**. If the `X-foo` header did not exist, the rule will have no effect and will be ignored.
 
 ### Action `edit` - Modify content of selected header 
 
-the `edit` action will modify the content of header value based on regexp evaluation. 
+the `edit` action will modify the content of `header` based on regexp evaluation. (`header` **is case insensitive**.).
+
 Basically, the following actions will be executed:
-* If the `header` does not already exist, it will be added with its `value`
+* If the `header` does not already exist, it will be added with `value` content
 * If the `header` already exists:
-  * If the regexp `replace` match, it is replaced by `value`without any other change 
-  * If the regexp does not match, `value` is added at the end of with the `sep` separator
-`header` **is case insensitive**. 
-
-**Required** attributes for `edit`:
-* `header`  : header to be modified
-* `value`   : value to be added to the header
-* `replace` : Go regexp to locate the area to be replaced
-* `sep`     : separator to use if the value must be added at the end of the header
-* `action`  : must be 'edit' to perform `edit`action 
-
-**Optional** attributes for `edit`:
-* `name`    : name of the change. Only used for logs
-* `req`     : boolean => **true** = request / **false** *(default)* = response
-
-**example:**
+  * If the regexp `replace` match, it will be replaced by `value` without any other change 
+  * If the regexp does not match, `value` content will be added to the existing header
 ```yaml
-headerChange:
-  header:  'Cache-Control'
-  value:   'max-age=1000'
-  replace: 'max-age=[0-9]+'
-  sep: ', '           # Separator to use whe you append value to existing header
-  action: 'edit'       # set/unset/append/edit => see documentation
+#Example
+- rule:
+  name: 'edit Cache-Control Header to js requests'
+  regexp: '\.js$'
+  requestHeaders:
+    Cache-Control: 
+      value: 'max-age=1000'
+      replace: 'max-age=[0-9]+'
+      action: 'edit'
 ```
-*This will give the following results in the headers of the response:*
-* If the *Cache-Control* header does not exist:
-  * Response header:  `Cache-Control: max-age=1000`
-* If the *Cache-Control* header exist with value: ` no-store, max-age=0, no-cache`
-  * Response header:  `Cache-Control: no-store, max-age=1000, no-cache`
-* If the *Cache-Control* header exist with value: ` no-store, no-cache`
-  * Response header:  `Cache-Control: no-store, no-cache, max-age=1000`
+If `Cache-Control` did not exist, it **will be created** with the value `max-age=1000`. If `Cache-Control` existed with the value `no-cache`, the value `max-age=1000` **will be added**. If `Cache-Control` existed with the value `no-cache, max-age=0, must-revalidate`, the value **will be changed** to `no-cache, max-age=1000, must-revalidate`.  
 
 ### Action `append` - add value to selected header 
 
-the `append` action will add the `value` attribute to the `header`. `header` **is case insensitive**. The standard allows the addition of a value either by concatenating it with the existing `value`, or by adding a second `header` with the same name. The `append` action allows both, depending on the presence or absence of the `sep` separator. If it is present, the value will be concatenated, otherwise a `header` with the same name will be added. 
-If the `header` was not existing, it will be added.
-
-**Required** attributes for `append`:
-- `header`  : header to modify
-* `value`   : value to be added to the header
-* `sep`     : separator to use if you prefer to concatenate the value to existing one
-- `action`  : must be 'append' to perform `append`action 
-
-**Optional** attributes for `append`:
-- `name`    : name of the change. Only used for logs
-- `req`     : boolean => **true** = request / **false** *(default)* = response
-
+the `append` action will add the `value` attribute to the `header`. (`header` **is case insensitive**). If the `header` was not existing, it will be added.
+```yaml
+#Example
+- rule:
+  name: 'Append X-foo=bar Header to js requests'
+  regexp: '\.js$'
+  requestHeaders:
+    X-foo: 
+      value: 'bar'
+      action: 'append'
+```
+The `X-foo=bar` header will be added to requests ending in **.js**. If the `X-foo` header already exists with another value, new value will be added without any change on existing one.
 
 ## Date manipulation
 Whatever the action (except `unset`), it is possible to add a replacement sequence in the `value` attribute. This sequence allows to calculate a date in the future. The sequence will be replaced by the date in http format. This is particularly interesting if you want to reproduce the behavior of the mod_expires of the Apache httpd server
-
-**example:**
 ```yaml
-headerChange:
-  header:  'Expires'
-  value:   '@DT_ADD#86400@'
-  action:  'set'
+#Example
+- rule:
+  name: 'Set Expires in 1 day on js query'
+  regexp: '\.js$'
+  requestHeaders:
+    Expires: 
+      value: '@DT_ADD#86400@'
+      action: 'set'
 ```
 Sequence is construct with **@DT_ADD#xxx@** with `xxx` the number of seconds to add to the time it will be when the request is processed.
 
-If the above request is executed on April 10, 2021 at 10:42:00, the folowwing header will be added to the response **(as 86400 seconds equals to 1 day)**
+If the above request is executed on April 10, 2021 at 10:42:00, the folowwing header will be set to the response **(as 86400 seconds equals to 1 day)**
 `Expires: Sun, 11 Apr 2021 10:42:00 GMT`.
 
 If sequence is surround with other text values, only sequence will be replaced by the plugin. if `We are @DT_ADD#86400@ - have a nice day!` is used as `value`, result header will be: `We are Sun, 11 Apr 2021 10:42:00 GMT - have a nice day!`
+
 
 ## WARNING
 
@@ -202,26 +181,10 @@ For each query, all the rules will be tested. The addition of a very large numbe
 
 ### Execution order
 The different rules will be evaluated **in the order in which they are defined**, as will the header changes. Several rules **can be applied successively to the same request**.
-`defaultHeaders` modifications are only applied if no rule has been used on request.
+`NO_MATCH` rule will only be applied if no rule has been used before on request.
 
-```yaml
-#Example
-- Rule:
-  Name: 'Header addition'
-  Header: 'X-Custom-2'
-  Value: 'True'
-  Type: 'Set'
-- Rule:
-  Name: 'Header deletion'
-  Header: 'X-Custom-2'
-  Type: 'Del'
-- Rule:
-  Name: 'Header join'
-  Header: 'X-Custom-2'
-  Value: 'False'
-  Type: 'Set'
-```
-Will firstly set the header `X-Custom-2` to 'True', then delete it and lastly set it again but with `False`
+### Multiple header
+The **HTTP** standard indicates that it is possible to assign several values to the same header. To do this, you must either define the header and place all the values by separating them with a comma (`MyHeader=val1, Val2 ...`), or by declaring the header several times (`MyHeader=val1` and `MyHeader=val2`). The two notations are equivalent and the **plugin uses the second one**.
 
 # Authors
 * **dclairac** ([linkedin](https://www.linkedin.com/in/dclairac/))
