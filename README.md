@@ -13,7 +13,7 @@ experimental:
   plugins:
     traefik-plugin-header:
       moduleName: github.com/dclairac/traefik-plugin-headers
-      version: v1.0.0
+      version: [PLUGIN_VERSION]
 ```
 
 ### Dynamic configuration
